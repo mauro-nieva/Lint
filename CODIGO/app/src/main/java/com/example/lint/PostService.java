@@ -2,7 +2,6 @@ package com.example.lint;
 
 import android.app.IntentService;
 import android.content.Intent;
-import android.content.Context;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -38,8 +37,9 @@ public class PostService extends IntentService {
             String url=intent.getExtras().getString("url");
             JSONObject datosJson=new JSONObject(intent.getExtras().getString(("datosJson")));
             String token=intent.getExtras().getString("token");
+            String operacion=intent.getExtras().getString("operacion");
 
-            ejecutarPost(url,datosJson,token);
+            ejecutarPost(url,datosJson,token,operacion);
 
             Log.i("LOG_SERVICE","Se ejecuto onHandleIntent()");
         }
@@ -49,7 +49,7 @@ public class PostService extends IntentService {
         }
     }
 
-    protected void ejecutarPost(String url,JSONObject datosJson,String token)
+    protected void ejecutarPost(String url,JSONObject datosJson,String token, String operacion)
     {
         String action="";
 
@@ -63,7 +63,10 @@ public class PostService extends IntentService {
         if(url.equals("http://so-unlam.net.ar/api/api/event"))
             action="com.example.intentservice.intent.action.RESPUESTA_EVENT";
 
-        String result=Post(url,datosJson,token);
+        if(url.equals("http://so-unlam.net.ar/api/api/refresh"))
+            action="com.example.intentservice.intent.action.RESPUESTA_TOKEN";
+
+        String result=Post(url,datosJson,token,operacion);
 
         Intent i=new Intent(action);
         i.putExtra("datosJson",result);
@@ -71,7 +74,7 @@ public class PostService extends IntentService {
         sendBroadcast(i);
     }
 
-    private String Post(String url,JSONObject datosJson, String token)
+    private String Post(String url,JSONObject datosJson, String token, String operacion)
     {
         HttpURLConnection urlConnection=null;
         String result="";
@@ -91,7 +94,7 @@ public class PostService extends IntentService {
             urlConnection.setDoOutput(true);
             urlConnection.setDoInput(true);
             urlConnection.setConnectTimeout(5000);
-            urlConnection.setRequestMethod("POST");
+            urlConnection.setRequestMethod(operacion);
 
             DataOutputStream wr=new DataOutputStream(urlConnection.getOutputStream());
 

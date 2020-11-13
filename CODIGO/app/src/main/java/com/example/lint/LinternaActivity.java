@@ -1,12 +1,9 @@
 package com.example.lint;
 
-import androidx.appcompat.app.AppCompatActivity;
-
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.hardware.Camera;
 import android.hardware.Sensor;
@@ -21,16 +18,17 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AppCompatActivity;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -41,6 +39,7 @@ public class LinternaActivity extends AppCompatActivity {
     private ImageView imgModo;
     private ImageView imgInternet;
     private ImageView imgLog;
+    private ImageView imgEnviarValores;
     private Button btnLinterna;
     private TextView txtBateria ;
     private TextView txtX ;
@@ -49,13 +48,17 @@ public class LinternaActivity extends AppCompatActivity {
     private TextView txtLuminosidad ;
     private TextView txtProximidad ;
 
-    //Variables de Broadcast Receiver para Post
+    //Variables de Broadcast Receiver para Registro de evento
     public IntentFilter filtro;
     private LinternaActivity.ReceptorOperacion receiver;
 
+    //Variables de Broadcast Receiver para Token Refresh
+    private IntentFilter filtroTokenRefresh;
+    private BReceiverTokenRefresh receiverTokenRefresh;
+
     //variables para verificar bateria
     private IntentFilter filtroBateria;
-    private BReceiverBateria receiverBateria=new BReceiverBateria();
+    private BReceiverBateria receiverBateria;
 
     //variables para el sensor acelerometro
     private SensorManager sManagerAcelerometro;
@@ -93,7 +96,16 @@ public class LinternaActivity extends AppCompatActivity {
     //variables funcionales
     private boolean isAuto;
     private String token;
-    private String ultima_activity;
+    private String tokenRefresh;
+    private String ultimaActivity;
+    private String modo;
+
+    //variables para renovar el token
+    private Handler handlerTokenRefresh;
+    private Timer timerTokenRefresh;
+
+    //variable clase SharedPreferences
+    public ArchivoPermanente archivoPermanente;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -104,6 +116,7 @@ public class LinternaActivity extends AppCompatActivity {
         imgModo=(ImageView) findViewById(R.id.imgModo);
         imgInternet=(ImageView) findViewById(R.id.imgInternet);
         imgLog=(ImageView) findViewById(R.id.imgLog);
+        imgEnviarValores=(ImageView) findViewById(R.id.imgEnviarValores);
         btnLinterna=(Button) findViewById(R.id.btnLinterna);
         txtBateria=(TextView) findViewById(R.id.txtBateria);
         txtX=(TextView) findViewById(R.id.txtX);
@@ -119,16 +132,22 @@ public class LinternaActivity extends AppCompatActivity {
         isLuminosidad=true;
         isProximidad=true;
         internetOn=true;
-        receiver=new LinternaActivity.ReceptorOperacion();
+
+        receiver=new ReceptorOperacion();
+        receiverBateria=new BReceiverBateria();
+        receiverTokenRefresh=new BReceiverTokenRefresh();
 
         btnLinterna.setOnClickListener(OnClickLinterna);
         imgModo.setOnClickListener(OnClickModo);
         imgLog.setOnClickListener(OnClickLog);
+        imgEnviarValores.setOnClickListener(OnClickValores);
 
-        ObtieneToken();
-        ObtieneUltimaActivity();
+        //Obtiene variables del archivo SharedPreferences
+        ObtieneVariablesArchivo();
+
         ChequeaCamara();
         ActivaTimerInternet();
+        ActivaTimerIokenRefresh();
 
         InicializaSensorAcelerometro();
         InicializaSensorLuminosidad();
@@ -136,48 +155,50 @@ public class LinternaActivity extends AppCompatActivity {
 
         ConfigBReceiverBateria();
         configurarBroadcastreceiver();
+        configurarBreceiverToken();
 
         getSupportActionBar().hide();
 
-        if(ultima_activity=="Login")
-            RegistraEvento("LOGIN","Login a traves de api.");
+        //mantener pantalla encendida
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        if(ultimaActivity=="Login") {
+            //Se registra el evento Login
+            RegistraEvento("LOGIN", "Login a traves de api.");
+            //Se establece el modo manual por defecto en el archivo Shared Preferences
+            archivoPermanente.escribeModo("manual",this);
+            modo="manual";
+        }
+        else
+        {
+            //Si la ultima activity no fue Login chequea el modo que tenia
+            if(modo=="auto") {
+                imgModo.setImageResource(R.drawable.auto);
+                ejecutarAuto();
+                isAuto=true;
+            }
+        }
+
+        Log.i("LOG_LINTERNA","OnCreate");
+
     }
 
-    //Obtiene el token del archivo Shared Preferences
+    //Obtiene variables del archivo Shared Preferences
     //----------------------------------------------------------------------------------------------
-    public void ObtieneToken()
+    public void ObtieneVariablesArchivo()
     {
-        try
-        {
-            SharedPreferences preferences=getSharedPreferences("Historial", Context.MODE_PRIVATE);
-            token=preferences.getString("token","");
-
-            Log.i("LOG_LINTERNA","Token Shared Preferences:"+token);
-        }
-        catch(Exception e)
-        {
-            Log.e("LOG_LINTERNA","Error Token Shared Preferences:"+e.getMessage());
-        }
+        archivoPermanente=new ArchivoPermanente();
+        archivoPermanente.ObtieneToken(this);
+        archivoPermanente.ObtieneUltimaActivity(this);
+        archivoPermanente.ObtieneModo(this);
+        token=archivoPermanente.token;
+        tokenRefresh=archivoPermanente.tokenRefresh;
+        ultimaActivity=archivoPermanente.ultimaActivity;
+        modo=archivoPermanente.modo;
     }
+
     //----------------------------------------------------------------------------------------------
 
-    //Obtiene ultima activity del archivo Shared Preferences
-    //----------------------------------------------------------------------------------------------
-    public void ObtieneUltimaActivity()
-    {
-        try
-        {
-            SharedPreferences preferences=getSharedPreferences("Historial", Context.MODE_PRIVATE);
-            ultima_activity=preferences.getString("activity","");
-
-            Log.i("LOG_LINTERNA","Ultima Activity Shared Preferences:"+ultima_activity);
-        }
-        catch(Exception e)
-        {
-            Log.e("LOG_LINTERNA","Error Ultima Activity Shared Preferences:"+e.getMessage());
-        }
-    }
-    //----------------------------------------------------------------------------------------------
 
     //Configuracion de BroadcastReceiver de Registro
     //----------------------------------------------------------------------------------------------
@@ -191,13 +212,60 @@ public class LinternaActivity extends AppCompatActivity {
     }
     //----------------------------------------------------------------------------------------------
 
+    //Configuracion de BroadcastReceiver de Bateria
+    //----------------------------------------------------------------------------------------------
+    private void ConfigBReceiverBateria(){
+
+        filtroBateria = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+        registerReceiver(receiverBateria,filtroBateria);
+
+    }
+    //----------------------------------------------------------------------------------------------
+
+    //Configuracion de BroadcastReceiver de TokenRefresh
+    //----------------------------------------------------------------------------------------------
+    private void configurarBreceiverToken(){
+
+        filtroTokenRefresh=new IntentFilter("com.example.intentservice.intent.action.RESPUESTA_TOKEN");
+
+        filtroTokenRefresh.addCategory(Intent.CATEGORY_DEFAULT);
+        registerReceiver(receiverTokenRefresh,filtroTokenRefresh);
+
+    }
+    //----------------------------------------------------------------------------------------------
+
+    //BroadcastReceiver de Bateria
+    //----------------------------------------------------------------------------------------------
+    public class BReceiverBateria extends BroadcastReceiver
+    {
+        public void onReceive(Context context, Intent intent){
+            try{
+                context.unregisterReceiver(this);
+                int currentLevel = intent.getIntExtra(BatteryManager.EXTRA_LEVEL,-1);
+                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE,-1);
+                int level = -1;
+                if (currentLevel >=0 && scale > 0){
+                    level= (currentLevel * 100)/scale;
+                }
+                txtBateria.setText(level+"%");
+            }
+            catch(Exception e)
+            {
+                Log.e("LOG_LINTERNA","Error Broadcast Receiver de Bateria:"+e.getMessage());
+            }
+
+        }
+    }
+    //----------------------------------------------------------------------------------------------
+
+
     //Reistra el evento a traves de un post
     //----------------------------------------------------------------------------------------------
     public void RegistraEvento(String evento,String descripcion)
     {
         try
         {
-            escribeLog(evento);
+            archivoPermanente.escribeLog(evento,this);
 
             if(internetOn)
             {
@@ -212,6 +280,7 @@ public class LinternaActivity extends AppCompatActivity {
                 i.putExtra("url", "http://so-unlam.net.ar/api/api/event");
                 i.putExtra("datosJson", obj.toString());
                 i.putExtra("token",token);
+                i.putExtra("operacion", "POST");
 
                 startService(i);
 
@@ -219,7 +288,7 @@ public class LinternaActivity extends AppCompatActivity {
             }
             else
                 {
-                    escribeLog("Sin conexion a internet.");
+                    archivoPermanente.escribeLog("Sin conexion a internet.",this);
                     Log.e("LOG_LINTERNA","POST REGISTRO EVENTO Sin conexion a internet");
                 }
         }
@@ -231,34 +300,38 @@ public class LinternaActivity extends AppCompatActivity {
     }
     //----------------------------------------------------------------------------------------------
 
-    //Escribe el log en el archivo Shared Preferences
+    //Actualiza el token a traves de un put
     //----------------------------------------------------------------------------------------------
-    private void escribeLog(String linea)
+    public void ActualizaToken()
     {
-        try {
-            SharedPreferences preferences = getSharedPreferences("Historial", Context.MODE_PRIVATE);
-
-            SharedPreferences.Editor editor = preferences.edit();
-
-            String contenido = preferences.getString("log", "");
-
-            Calendar c = Calendar.getInstance();
-            SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-            String formattedDate = df.format(c.getTime());
-
-            String agregado = formattedDate + " " + linea;
-
-            editor.putString("log", contenido + agregado + "\n");
-
-            editor.commit();
-
-            Log.i("LOG_LINTERNA","Log Shared Preferences: "+agregado);
-        }
-        catch(Exception e)
+        try
         {
-            Log.e("LOG_LINTERNA","Error Log Shared Preferences:"+e.getMessage());
-        }
+            if(internetOn)
+            {
+                JSONObject obj = new JSONObject();
 
+                Intent i = new Intent(LinternaActivity.this, PostService.class);
+
+                i.putExtra("url", "http://so-unlam.net.ar/api/api/refresh");
+                i.putExtra("datosJson", obj.toString());
+                i.putExtra("token",tokenRefresh);
+                i.putExtra("operacion", "PUT");
+
+                startService(i);
+
+                Log.i("LOG_LINTERNA","Se ejecuta PUT TOKEN REFRESH.");
+            }
+            else
+            {
+                //archivoPermanente.escribeLog("Sin conexion a internet.",this);
+                Log.e("LOG_LINTERNA","PUT TOKEN REFRESH Sin conexion a internet");
+            }
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+            Log.e("LOG_LINTERNA","Error Put Token Refresh: "+e.getMessage());
+        }
     }
     //----------------------------------------------------------------------------------------------
 
@@ -286,11 +359,56 @@ public class LinternaActivity extends AppCompatActivity {
                     Log.e("LOG_LINTERNA","Error en Registro Evento. "+msg);
                 }
 
-                escribeLog(datosJsonString);
+                archivoPermanente.escribeLog(datosJsonString,context);
             }
             catch(Exception e)
             {
                 Log.e("LOG_LINTERNA","Error Json Login Thread:"+e.getMessage());
+            }
+
+        }
+    }
+    //----------------------------------------------------------------------------------------------
+
+    //Broadcast Receiver para Token Refresh
+    //----------------------------------------------------------------------------------------------
+    public class BReceiverTokenRefresh extends BroadcastReceiver
+    {
+        public void onReceive(Context context, Intent intent){
+            try{
+                String datosJsonString= intent.getStringExtra("datosJson");
+                JSONObject datosJson = new JSONObject(datosJsonString);
+                String success = datosJson.getString("success");
+
+                Log.i("LOG_LINTERNA","Datos Json Actualizar Token Thread:"+datosJsonString);
+
+
+                if(success.equals("true"))
+                {
+                    Log.i("LOG_LINTERNA","Se Actualizo el Token.");
+                    Log.i("LOG_LINTERNA","Token:"+datosJson.get("token"));
+                    Log.i("LOG_LINTERNA","Token Refresh:"+datosJson.get("token_refresh"));
+
+                    token=datosJson.getString("token");
+                    tokenRefresh=datosJson.getString("token_refresh");
+
+                    //Se guardan los nuevos token en el shared preferences
+                    archivoPermanente.escribeToken(context);
+
+                    Toast.makeText(getApplicationContext(), "Token Actualizado", Toast.LENGTH_LONG).show();
+
+                }
+                else
+                {
+                    String msg=datosJson.getString("msg");
+                    Log.e("LOG_LINTERNA","Error en Actualizar Token. "+msg);
+                }
+
+                RegistraEvento("TOKEN REFRESH","Actualizacion de token ");
+            }
+            catch(Exception e)
+            {
+                Log.e("LOG_LINTERNA","Error Json Actualizar Token Thread:"+e.getMessage());
             }
 
         }
@@ -326,7 +444,26 @@ public class LinternaActivity extends AppCompatActivity {
         }
         catch(Exception e)
         {
-            Log.e("LOG_LOGIN","Error Activar Timer Internet:"+e.getMessage());
+            Log.e("LOG_LINTERNA","Error Activar Timer Internet:"+e.getMessage());
+        }
+    }
+    //----------------------------------------------------------------------------------------------
+
+    //Activa el Timer de Token Refresh
+    //----------------------------------------------------------------------------------------------
+    public void ActivaTimerIokenRefresh()
+    {
+        try
+        {
+            //Se activa el timer que renueva el token
+            handlerTokenRefresh = new Handler();
+            timerTokenRefresh = new Timer();
+            //Cada 25 minutos
+            timerTokenRefresh.schedule(timerTaskTokenRefresh, 0, 1500000);
+        }
+        catch(Exception e)
+        {
+            Log.e("LOG_LINTERNA","Error Activar Timer Token Refresh:"+e.getMessage());
         }
     }
     //----------------------------------------------------------------------------------------------
@@ -348,6 +485,23 @@ public class LinternaActivity extends AppCompatActivity {
     }
     //----------------------------------------------------------------------------------------------
 
+    //Libera el Timer que renueva el token
+    //----------------------------------------------------------------------------------------------
+    public void LiberaTimerToken()
+    {
+        try
+        {
+            //Se cancela el timer y timertask que renueva el token
+            timerTaskTokenRefresh.cancel();
+            timerTokenRefresh.cancel();
+        }
+        catch(Exception e)
+        {
+            Log.e("LOG_LINTERNA","Error Liberar Timer Token:"+e.getMessage());
+        }
+    }
+    //----------------------------------------------------------------------------------------------
+
     //Inicializacion de Sensor Acelerometro
     //----------------------------------------------------------------------------------------------
     public void InicializaSensorAcelerometro()
@@ -356,6 +510,10 @@ public class LinternaActivity extends AppCompatActivity {
         {
             sManagerAcelerometro = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
             sensorAcelerometro = sManagerAcelerometro.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+
+            aTaskAcelerometro=new AsyncTaskAcelerometro();
+            aTaskAcelerometro.execute(sManagerAcelerometro, sensorAcelerometro);
+
         }
         catch(Exception e)
         {
@@ -424,22 +582,52 @@ public class LinternaActivity extends AppCompatActivity {
                 imgModo.setImageResource(R.drawable.manual);
                 cancelarAuto();
                 isAuto=false;
+                archivoPermanente.escribeModo("manual",LinternaActivity.this);
 
                 RegistraEvento("MODO MANUAL","Se cambio aplicacion a modo manual.");
+                Toast.makeText(getApplicationContext(), "Modo Manual", Toast.LENGTH_LONG).show();
             }
             else
             {
                 imgModo.setImageResource(R.drawable.auto);
                 ejecutarAuto();
                 isAuto=true;
+                archivoPermanente.escribeModo("auto",LinternaActivity.this);
 
                 RegistraEvento("MODO AUTO","Se cambio aplicacion a modo automatico.");
+                Toast.makeText(getApplicationContext(), "Modo Auto", Toast.LENGTH_LONG).show();
             }
 
         }
     };
     //----------------------------------------------------------------------------------------------
 
+    //OnClickListener del boton de enviar valores
+    //----------------------------------------------------------------------------------------------
+    View.OnClickListener OnClickValores=new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+
+                String modo = "Manual";
+
+                if (isAuto)
+                    modo = "Auto";
+
+                String msg = "Modo: " + modo +
+                        " " + txtX.getText() +
+                        " " + txtY.getText() +
+                        " " + txtZ.getText() +
+                        " " + txtLuminosidad.getText() +
+                        " " + txtProximidad.getText() +
+                        " Bateria: " + txtBateria.getText();
+
+                RegistraEvento("VALORES", msg);
+
+                Toast.makeText(getApplicationContext(), "Valores Enviados", Toast.LENGTH_LONG).show();
+
+        }
+    };
+    //----------------------------------------------------------------------------------------------
 
     //OnClickListener del boton de Log
     //----------------------------------------------------------------------------------------------
@@ -525,9 +713,18 @@ public class LinternaActivity extends AppCompatActivity {
             handlerInternet.post(new Runnable() {
                 public void run() {
                     try {
-                        LinternaActivity.AsyncTaskInternet aTaskInternet=new LinternaActivity.AsyncTaskInternet();
-                        //Se ejecuta el asyncTask que consulta el estado de conexion
-                        aTaskInternet.execute();
+                        ConnectivityManager connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                        NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
+
+                        if (networkInfo != null && networkInfo.isConnected())
+                        {
+                            imgInternet.setImageResource(R.drawable.internet_on);
+                            internetOn=true;
+                        }
+                        else {
+                            imgInternet.setImageResource(R.drawable.internet_off);
+                            internetOn=false;
+                        }
                     } catch (Exception e) {
                         Log.e("LOG_LOGIN","Error Conexion Internet:"+e.getMessage());
                     }
@@ -537,46 +734,22 @@ public class LinternaActivity extends AppCompatActivity {
     };
     //----------------------------------------------------------------------------------------------
 
-    //AsyncTask de conexion a internet
-    //------------------------------------------------------------------------------------------
-    class AsyncTaskInternet extends AsyncTask {
+    //TimerTask de Token Refresh
+    //----------------------------------------------------------------------------------------------
+    public TimerTask timerTaskTokenRefresh = new TimerTask() {
         @Override
-        protected Object doInBackground(Object[] objects) {
-
-            String mensaje;
-
-            ConnectivityManager connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-            NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
-
-            if (networkInfo != null && networkInfo.isConnected()) {
-                mensaje="SI";
-            } else {
-                mensaje="NO";
-            }
-
-            return mensaje;
+        public void run() {
+            handlerInternet.post(new Runnable() {
+                public void run() {
+                    try {
+                        ActualizaToken();
+                    } catch (Exception e) {
+                        Log.e("LOG_LINTERNA","Error Token Refresh:"+e.getMessage());
+                    }
+                }
+            });
         }
-
-        @Override
-        protected void onProgressUpdate(Object[] values) {
-            super.onProgressUpdate(values);
-
-        }
-
-        @Override
-        protected void onPostExecute(Object o) {
-            super.onPostExecute(o);
-
-            if(o.equals("SI")) {
-                imgInternet.setImageResource(R.drawable.internet_on);
-                internetOn=true;
-            }
-            else {
-                imgInternet.setImageResource(R.drawable.internet_off);
-                internetOn=false;
-            }
-        }
-    }
+    };
     //----------------------------------------------------------------------------------------------
 
     //AsyncTask Acelerometro
@@ -617,7 +790,6 @@ public class LinternaActivity extends AppCompatActivity {
                     }
                 }
             }
-                //Toast.makeText(getApplicationContext(), "SHAKE!!", Toast.LENGTH_LONG).show();
         }
 
         @Override
@@ -631,33 +803,33 @@ public class LinternaActivity extends AppCompatActivity {
         public SensorEventListener SensorEventListenerAcel=new SensorEventListener() {
             @Override
             public void onSensorChanged(SensorEvent sensorEvent) {
-                if (sensorAcelerometro.getType() == Sensor.TYPE_ACCELEROMETER) {
-                    float x = sensorEvent.values[0];
-                    float y = sensorEvent.values[1];
-                    float z = sensorEvent.values[2];
-                    boolean shake;
+                synchronized (this) {
+                    if (sensorAcelerometro.getType() == Sensor.TYPE_ACCELEROMETER) {
+                        float x = sensorEvent.values[0];
+                        float y = sensorEvent.values[1];
+                        float z = sensorEvent.values[2];
+                        boolean shake;
 
-                    long curTime = System.currentTimeMillis();
+                        long curTime = System.currentTimeMillis();
 
-                    if ((curTime - lastUpdate) > 100) {
+                        if ((curTime - lastUpdate) > 100) {
 
-                        long diffTime = (curTime - lastUpdate);
-                        lastUpdate = curTime;
+                            long diffTime = (curTime - lastUpdate);
+                            lastUpdate = curTime;
 
-                        float speed = Math.abs(x + y + z - last_x - last_y - last_z)/ diffTime * 10000;
+                            float speed = Math.abs(x + y + z - last_x - last_y - last_z) / diffTime * 10000;
 
-                        if (speed > SHAKE_THRESHOLD)
-                            shake=true;
-                        else
-                            shake=false;
+                            if (speed > SHAKE_THRESHOLD)
+                                shake = true;
+                            else
+                                shake = false;
 
-                            //Toast.makeText(getApplicationContext(), "SHAKE!!", Toast.LENGTH_LONG).show();
+                            publishProgress(x, y, z, shake);
 
-                        publishProgress(x,y,z,shake);
-
-                        last_x = x;
-                        last_y = y;
-                        last_z = z;
+                            last_x = x;
+                            last_y = y;
+                            last_z = z;
+                        }
                     }
                 }
             }
@@ -692,7 +864,6 @@ public class LinternaActivity extends AppCompatActivity {
 
             float luminosidad=(float)values[0];
 
-            //getSupportActionBar().setTitle("Luminosity : " + valor + " lx");
             txtLuminosidad.setText("L: "+luminosidad+" lx");
 
             //Si la luminosidad es nula, el flash esta apagado y no esta en el bolsillo->enciende
@@ -823,12 +994,22 @@ public class LinternaActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
 
-        InicializaSensorAcelerometro();
+        Log.i("LOG_LINTERNA","OnResume()");
+    }
+    //----------------------------------------------------------------------------------------------
+
+    //onStart
+    //----------------------------------------------------------------------------------------------
+    protected void onStart() {
+        super.onStart();
+
         aTaskAcelerometro=new AsyncTaskAcelerometro();
         aTaskAcelerometro.execute(sManagerAcelerometro, sensorAcelerometro);
 
         if(isAuto && isLuminosidad && isProximidad)
             ejecutarAuto();
+
+        Log.i("LOG_LINTERNA","OnStart()");
     }
     //----------------------------------------------------------------------------------------------
 
@@ -849,12 +1030,27 @@ public class LinternaActivity extends AppCompatActivity {
     protected void onPause()
     {
         super.onPause();
+
+        Log.i("LOG_LINTERNA","OnPause()");
+    }
+    //----------------------------------------------------------------------------------------------
+
+    //onStop
+    //----------------------------------------------------------------------------------------------
+    protected void onStop()
+    {
+        super.onStop();
         aTaskAcelerometro.cancel(true);
 
         if(isAuto && isProximidad && isLuminosidad) {
             cancelarAuto();
             apagaFlash();
         }
+
+        if(isOn)
+            apagaFlash();
+
+        Log.i("LOG_LINTERNA","OnStop()");
     }
     //----------------------------------------------------------------------------------------------
 
@@ -880,44 +1076,14 @@ public class LinternaActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
 
-        Log.i("LOG_LINTERNA","OnDestroy");
+        Log.i("LOG_LINTERNA","OnDestroy()");
 
         LiberaCamara();
         LiberaTimerInternet();
+        LiberaTimerToken();
+        aTaskAcelerometro.cancel(true);
     }
     //----------------------------------------------------------------------------------------------
 
-    //Configuracion de BroadcastReceiver de Bateria
-    //----------------------------------------------------------------------------------------------
-    private void ConfigBReceiverBateria(){
 
-        filtroBateria = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
-        registerReceiver(receiverBateria,filtroBateria);
-
-    }
-    //----------------------------------------------------------------------------------------------
-
-    //BroadcastReceiver de Bateria
-    //----------------------------------------------------------------------------------------------
-    public class BReceiverBateria extends BroadcastReceiver
-    {
-        public void onReceive(Context context, Intent intent){
-            try{
-                context.unregisterReceiver(this);
-                int currentLevel = intent.getIntExtra(BatteryManager.EXTRA_LEVEL,-1);
-                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE,-1);
-                int level = -1;
-                if (currentLevel >=0 && scale > 0){
-                    level= (currentLevel * 100)/scale;
-                }
-                txtBateria.setText(level+"%");
-            }
-            catch(Exception e)
-            {
-                Log.e("LOG_LINTERNA","Error Broadcast Receiver de Bateria:"+e.getMessage());
-            }
-
-        }
-    }
-    //----------------------------------------------------------------------------------------------
 }

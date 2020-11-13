@@ -1,17 +1,13 @@
 package com.example.lint;
 
-import androidx.appcompat.app.AppCompatActivity;
-
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.hardware.Camera;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
@@ -21,11 +17,13 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -46,6 +44,10 @@ public class LoginActivity extends AppCompatActivity {
     private Timer timerInternet;
     private boolean internetOn;
 
+    //variable clase SharedPreferences
+    public ArchivoPermanente archivoPermanente;
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -63,12 +65,24 @@ public class LoginActivity extends AppCompatActivity {
         receiver=new LoginActivity.ReceptorOperacion();
         internetOn=true;
 
+        archivoPermanente=new ArchivoPermanente();
+
         ActivaTimerInternet();
         configurarBroadcastreceiver();
-        EscribeUltimaActivity();
+
+        //se guarda la ultima activity
+        archivoPermanente.ultimaActivity="Login";
+        archivoPermanente.escribeUltActivity(this);
 
         //Oculta la barra
         getSupportActionBar().hide();
+
+
+        //Solicita permiso para la camara en tiempo de ejecucion
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
+        {
+            ActivityCompat.requestPermissions(this, new String[] {android.Manifest.permission.CAMERA}, 50);
+        }
 
         Log.i("LOG_LOGIN","OnCreate");
     }
@@ -93,7 +107,8 @@ public class LoginActivity extends AppCompatActivity {
 
     //OnClickListener del boton de Registrarse
     //----------------------------------------------------------------------------------------------
-    View.OnClickListener OnClickRegistrarse=new View.OnClickListener() {
+    View.OnClickListener OnClickRegistrarse=new View.OnClickListener()
+    {
         @Override
         public void onClick(View v) {
             Intent intent=new Intent(LoginActivity.this,RegisterActivity.class);
@@ -119,6 +134,7 @@ public class LoginActivity extends AppCompatActivity {
 
                     i.putExtra("url", "http://so-unlam.net.ar/api/api/login");
                     i.putExtra("datosJson", obj.toString());
+                    i.putExtra("operacion", "POST");
 
                     startService(i);
 
@@ -150,84 +166,7 @@ public class LoginActivity extends AppCompatActivity {
     }
     //----------------------------------------------------------------------------------------------
 
-    //Escribe el log en el archivo Shared Preferences
-    //----------------------------------------------------------------------------------------------
-    private void escribeLog(String linea)
-    {
-        try {
-            SharedPreferences preferences = getSharedPreferences("Historial", Context.MODE_PRIVATE);
-
-            SharedPreferences.Editor editor = preferences.edit();
-
-            String contenido = preferences.getString("log", "");
-
-            Calendar c = Calendar.getInstance();
-            SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-            String formattedDate = df.format(c.getTime());
-
-            String agregado = formattedDate + " " + linea;
-
-            editor.putString("log", contenido + agregado + "\n");
-
-            editor.commit();
-
-            Log.i("LOG_LOGIN","Log Shared Preferences: "+agregado);
-        }
-        catch(Exception e)
-        {
-            Log.e("LOG_LOGIN","Error Log Shared Preferences:"+e.getMessage());
-        }
-
-    }
-    //----------------------------------------------------------------------------------------------
-
-    //Escribe el token en el archivo Shared Preferences
-    //----------------------------------------------------------------------------------------------
-    private void escribeToken(String token)
-    {
-        try {
-            SharedPreferences preferences = getSharedPreferences("Historial", Context.MODE_PRIVATE);
-
-            SharedPreferences.Editor editor = preferences.edit();
-
-            editor.putString("token", token);
-
-            editor.commit();
-
-            Log.i("LOG_LOGIN","Token Shared Preferences: "+token);
-        }
-        catch(Exception e)
-        {
-            Log.e("LOG_LOGIN","Error Token Shared Preferences:"+e.getMessage());
-        }
-
-    }
-    //----------------------------------------------------------------------------------------------
-
-    //Escribe la ultima Activity en el archivo Shared Preferences
-    //----------------------------------------------------------------------------------------------
-    private void EscribeUltimaActivity()
-    {
-        try {
-            SharedPreferences preferences = getSharedPreferences("Historial", Context.MODE_PRIVATE);
-
-            SharedPreferences.Editor editor = preferences.edit();
-
-            editor.putString("activity", "Login");
-
-            editor.commit();
-
-            Log.i("LOG_LOGIN","Activity Shared Preferences: Login");
-        }
-        catch(Exception e)
-        {
-            Log.e("LOG_LOGIN","Error Activity Shared Preferences:"+e.getMessage());
-        }
-
-    }
-    //----------------------------------------------------------------------------------------------
-
-    //Receptor de BroadcastReceiver
+    //BroadcastReceiver para el POST de Login
     //----------------------------------------------------------------------------------------------
     public class ReceptorOperacion extends BroadcastReceiver
     {
@@ -237,18 +176,22 @@ public class LoginActivity extends AppCompatActivity {
                 JSONObject datosJson = new JSONObject(datosJsonString);
                 String success = datosJson.getString("success");
 
-
                 Log.i("LOG_LOGIN","Datos Json Login Thread:"+datosJsonString);
-
 
                 if(success.equals("true"))
                 {
                     Toast.makeText(getApplicationContext(), "Ingreso correcto", Toast.LENGTH_LONG).show();
 
                     Log.i("LOG_LOGIN","Token:"+datosJson.get("token"));
-                    Log.i("LOG_LOGIN","Token:"+datosJson.get("token_refresh"));
+                    Log.i("LOG_LOGIN","Token Refresh:"+datosJson.get("token_refresh"));
 
-                    escribeToken(datosJson.get("token").toString());
+                    String token=datosJson.get("token").toString();
+                    String tokenRefresh=datosJson.get("token_refresh").toString();
+
+                    //Se escriben los token en el Shared Preferences
+                    archivoPermanente.token=token;
+                    archivoPermanente.tokenRefresh=tokenRefresh;
+                    archivoPermanente.escribeToken(context);
 
                     Intent Int_Linterna=new Intent(LoginActivity.this,LinternaActivity.class);
                     startActivity(Int_Linterna);
@@ -304,6 +247,7 @@ public class LoginActivity extends AppCompatActivity {
         Log.i("LOG_LOGIN","OnDestroy");
 
         LiberaTimerInternet();
+        finish();
     }
     //----------------------------------------------------------------------------------------------
 
@@ -315,9 +259,19 @@ public class LoginActivity extends AppCompatActivity {
             handlerInternet.post(new Runnable() {
                 public void run() {
                     try {
-                        Tarea_Internet AsyncTask_Internet=new Tarea_Internet();
-                        //Se ejecuta el asyncTask que consulta el estado de conexion
-                        AsyncTask_Internet.execute();
+                        ConnectivityManager connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                        NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
+
+                        if (networkInfo != null && networkInfo.isConnected())
+                        {
+                            imgInternet.setImageResource(R.drawable.internet_on);
+                            internetOn=true;
+                        }
+                        else {
+                            imgInternet.setImageResource(R.drawable.internet_off);
+                            internetOn=false;
+                        }
+
                     } catch (Exception e) {
                         Log.e("LOG_LOGIN","Error Conexion Internet:"+e.getMessage());
                     }
@@ -327,49 +281,6 @@ public class LoginActivity extends AppCompatActivity {
 
         }
     };
-    //----------------------------------------------------------------------------------------------
-
-    //AsyncTask de conexion a internet
-    //------------------------------------------------------------------------------------------
-    class Tarea_Internet extends AsyncTask {
-        @Override
-        protected Object doInBackground(Object[] objects) {
-
-            String mensaje;
-
-            ConnectivityManager connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-            NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
-
-            if (networkInfo != null && networkInfo.isConnected()) {
-                mensaje="SI";
-            } else {
-                mensaje="NO";
-            }
-
-            return mensaje;
-        }
-
-        @Override
-        protected void onProgressUpdate(Object[] values) {
-            super.onProgressUpdate(values);
-
-        }
-
-        @Override
-        protected void onPostExecute(Object o) {
-            super.onPostExecute(o);
-
-            if(o.equals("SI")) {
-                imgInternet.setImageResource(R.drawable.internet_on);
-                internetOn=true;
-            }
-            else {
-                imgInternet.setImageResource(R.drawable.internet_off);
-                internetOn=false;
-            }
-
-        }
-    }
     //----------------------------------------------------------------------------------------------
 
     //onPause

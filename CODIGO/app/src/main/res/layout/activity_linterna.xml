@@ -90,7 +90,7 @@
         android:layout_width="80dp"
         android:layout_height="80dp"
         android:layout_marginEnd="16dp"
-        android:layout_marginBottom="152dp"
+        android:layout_marginBottom="220dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:srcCompat="@drawable/manual" />
@@ -136,5 +136,15 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/imgModo"
         app:srcCompat="@drawable/log" />
+
+    <ImageView
+        android:id="@+id/imgEnviarValores"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:layout_marginTop="20dp"
+        android:layout_marginEnd="16dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/imgLog"
+        app:srcCompat="@drawable/enviar" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
